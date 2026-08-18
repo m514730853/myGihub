@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 #import <CoreLocation/CoreLocation.h>
 #import <SystemConfiguration/SystemConfiguration.h>
+#import <SystemConfiguration/CaptiveNetwork.h>
 
 @interface WiFiInfoManager : NSObject <CLLocationManagerDelegate>
 @property (nonatomic, strong) CLLocationManager *locationManager;
@@ -32,20 +33,33 @@
     return self;
 }
 
+- (CLAuthorizationStatus)getAuthStatus {
+    if (@available(iOS 14.0, *)) {
+        return _locationManager.authorizationStatus;
+    } else {
+        return [CLLocationManager authorizationStatus];
+    }
+}
+
 - (NSString *)getCurrentSSID {
-    if ([CLLocationManager authorizationStatus] == kCLAuthorizationStatusNotDetermined) {
-        [_locationManager requestWhenInUseAuthorization];
+    CLAuthorizationStatus status = [self getAuthStatus];
+    
+    if (status == kCLAuthorizationStatusNotDetermined) {
+        if (@available(iOS 14.0, *)) {
+            [_locationManager requestWhenInUseAuthorization];
+        }
     }
     
-    if ([CLLocationManager authorizationStatus] < kCLAuthorizationStatusAuthorizedWhenInUse) {
-        printf("错误: 需要位置服务权限来获取WiFi信息\n");
-        printf("请在 设置 > 隐私 > 位置服务 中允许本应用使用位置服务\n");
+    status = [self getAuthStatus];
+    if (status < kCLAuthorizationStatusAuthorizedWhenInUse) {
+        printf("Error: Location permission required\n");
+        printf("Enable in Settings > Privacy > Location Services\n");
         return nil;
     }
     
     [_locationManager startUpdatingLocation];
     
-    dispatch_time_t timeout = dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC);
+    dispatch_time_t timeout = dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC);
     dispatch_semaphore_wait(_semaphore, timeout);
     
     [_locationManager stopUpdatingLocation];
@@ -60,11 +74,20 @@
 - (NSString *)getSSIDFromSystem {
     NSString *ssid = nil;
     
-    NSArray *interfaces = (__bridge_transfer NSArray *)CNCopySupportedInterfaces();
+    CFArrayRef interfacesRef = CNCopySupportedInterfaces();
+    if (!interfacesRef) {
+        return nil;
+    }
+    
+    NSArray *interfaces = (__bridge_transfer NSArray *)interfacesRef;
     for (NSString *iface in interfaces) {
-        NSDictionary *info = (__bridge_transfer NSDictionary *)CNCopyCurrentNetworkInfo((__bridge CFStringRef)iface);
-        if (info && info[(id)kCNNetworkInfoKeySSID]) {
-            ssid = info[(id)kCNNetworkInfoKeySSID];
+        CFDictionaryRef infoRef = CNCopyCurrentNetworkInfo((__bridge CFStringRef)iface);
+        if (!infoRef) continue;
+        
+        NSDictionary *info = (__bridge_transfer NSDictionary *)infoRef;
+        NSString *ssidValue = info[@"SSID"];
+        if (ssidValue) {
+            ssid = ssidValue;
             break;
         }
     }
@@ -94,12 +117,10 @@ int main(int argc, const char *argv[]) {
         NSString *ssid = [manager getCurrentSSID];
         
         if (!ssid) {
-            printf("当前未连接WiFi或无法获取信息\n");
-            printf("提示: iOS 13+ 需要位置服务权限才能获取SSID\n");
+            printf("Not connected to WiFi\n");
+            printf("Note: iOS 13+ requires location permission\n");
             return 0;
         }
-        
-        printf("当前WiFi SSID: %s\n", [ssid UTF8String]);
         
         if (argc > 1 && strcmp(argv[1], "--json") == 0) {
             NSDictionary *info = @{
@@ -112,8 +133,10 @@ int main(int argc, const char *argv[]) {
                                                                error:&error];
             if (jsonData) {
                 NSString *jsonStr = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
-                printf("\nJSON:\n%s\n", [jsonStr UTF8String]);
+                printf("%s\n", [jsonStr UTF8String]);
             }
+        } else {
+            printf("SSID: %s\n", [ssid UTF8String]);
         }
         
         return 0;
