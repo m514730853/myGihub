@@ -86,22 +86,9 @@ jobs:
           cp build/GetWiFi.dylib $STAGING/Library/Loader/SBPlugins/
           chmod 755 $STAGING/usr/local/bin/getwifi $STAGING/Library/Loader/SBPlugins/GetWiFi.dylib
           
-          cat > $STAGING/DEBIAN/control << EOF
-Package: ${PACKAGE_NAME}
-Version: ${VERSION}
-Section: Utilities
-Priority: optional
-Architecture: arm64
-Maintainer: DebStudy <debstudy@example.com>
-Description: iOS WiFi信息获取越狱插件
-  命令行工具和SpringBoard插件
-  获取WiFi SSID、BSSID、信号强度
-Depends: firmware (>=11.0), mobilesubstrate
-EOF
+          printf 'Package: %s\nVersion: %s\nSection: Utilities\nPriority: optional\nArchitecture: arm64\nMaintainer: DebStudy <debstudy@example.com>\nDescription: iOS WiFi plugin\nDepends: firmware (>=11.0), mobilesubstrate\n' "$PACKAGE_NAME" "$VERSION" > $STAGING/DEBIAN/control
           
-          echo '#!/bin/sh
-chmod 755 /usr/local/bin/getwifi
-killall -9 SpringBoard 2>/dev/null || true' > $STAGING/DEBIAN/postinst
+          printf '#!/bin/sh\nchmod 755 /usr/local/bin/getwifi\nkillall -9 SpringBoard 2>/dev/null || true\n' > $STAGING/DEBIAN/postinst
           chmod 755 $STAGING/DEBIAN/postinst
           
           dpkg-deb -b $STAGING $DEB_FILE

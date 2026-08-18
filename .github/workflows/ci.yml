@@ -52,16 +52,6 @@ jobs:
       - name: Check .gitignore exists
         run: |
           if [ ! -f ".gitignore" ]; then
-            cat > .gitignore << 'EOF'
-build/
-output/
-deb_build/
-staging/
-*.deb
-.DS_Store
-.idea/
-.vscode/
-*.xcodeproj/
-EOF
+            printf 'build/\noutput/\ndeb_build/\nstaging/\n*.deb\n.DS_Store\n.idea/\n.vscode/\n*.xcodeproj/\n' > .gitignore
           fi
           echo "✅ .gitignore ready"

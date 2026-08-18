@@ -109,33 +109,12 @@ jobs:
           chmod 755 $PACKAGE_DIR/usr/local/bin/getwifi
           chmod 755 $PACKAGE_DIR/Library/Loader/SBPlugins/GetWiFi.dylib
           
-          INSTALLED_SIZE=$(du -sk $PACKAGE_DIR | cut -f1)
+          printf 'Package: %s\nVersion: %s\nSection: Utilities\nPriority: optional\nArchitecture: arm64\nMaintainer: DebStudy <debstudy@example.com>\nDescription: iOS WiFi plugin\n  Get WiFi SSID, BSSID, signal strength\nDepends: firmware (>=11.0), mobilesubstrate\n' "$PACKAGE_NAME" "$PACKAGE_VERSION" > $PACKAGE_DIR/DEBIAN/control
           
-          cat > $PACKAGE_DIR/DEBIAN/control << 'CONTROL'
-Package: com.debstudy.getwifi
-Version: 1.0.0
-Section: Utilities
-Priority: optional
-Architecture: arm64
-Maintainer: DebStudy <debstudy@example.com>
-Description: 获取iOS设备WiFi信息的越狱插件
-  提供命令行工具和SpringBoard插件
-  获取WiFi SSID、BSSID、信号强度等信息
-Depends: firmware (>=11.0), mobilesubstrate
-CONTROL
-          
-          cat > $PACKAGE_DIR/DEBIAN/postinst << 'POSTINST'
-#!/bin/sh
-chmod 755 /usr/local/bin/getwifi
-chmod 755 /Library/Loader/SBPlugins/GetWiFi.dylib
-killall -9 SpringBoard 2>/dev/null || true
-POSTINST
+          printf '#!/bin/sh\nchmod 755 /usr/local/bin/getwifi\nkillall -9 SpringBoard 2>/dev/null || true\n' > $PACKAGE_DIR/DEBIAN/postinst
           chmod 755 $PACKAGE_DIR/DEBIAN/postinst
           
-          cat > $PACKAGE_DIR/DEBIAN/postrm << 'POSTRM'
-#!/bin/sh
-killall -9 SpringBoard 2>/dev/null || true
-POSTRM
+          printf '#!/bin/sh\nkillall -9 SpringBoard 2>/dev/null || true\n' > $PACKAGE_DIR/DEBIAN/postrm
           chmod 755 $PACKAGE_DIR/DEBIAN/postrm
           
           DEB_FILE="${PACKAGE_NAME}_${PACKAGE_VERSION}_iphoneos-arm64.deb"
