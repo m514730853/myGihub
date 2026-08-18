@@ -43,32 +43,11 @@ jobs:
           cd $GITHUB_WORKSPACE
           export HOMEBREW_NO_REQUIRE_TAP_TRUST=1
           brew install dpkg || true
-          
           rm -rf staging
-          mkdir -p staging/DEBIAN staging/var/jb/usr/local/bin
-          
+          mkdir -p staging/var/jb/usr/local/bin
+          cp DEBIAN staging/ -r
           cp build/getwifi staging/var/jb/usr/local/bin/
           chmod 755 staging/var/jb/usr/local/bin/getwifi
-          
-          python3 -c "
-with open('staging/DEBIAN/control', 'w') as f:
-    f.write('Package: com.debstudy.getwifi\n')
-    f.write('Version: 1.0.0\n')
-    f.write('Section: Utilities\n')
-    f.write('Priority: optional\n')
-    f.write('Architecture: iphoneos-arm64\n')
-    f.write('Maintainer: DebStudy <debstudy@example.com>\n')
-    f.write('Description: GetWiFi - iOS WiFi SSID tool\n')
-    f.write(' A command-line tool to get current WiFi SSID\n')
-    f.write(' using public CoreLocation APIs on iOS.\n')
-    f.write('Depends: firmware (>=13.0)\n')
-"
-          
-          python3 -c "
-with open('staging/DEBIAN/postinst', 'w') as f:
-    f.write('#!/bin/sh\n')
-    f.write('chmod 755 /var/jb/usr/local/bin/getwifi\n')
-"
           chmod 755 staging/DEBIAN/postinst
           
           DEB_FILE="${PACKAGE_NAME}_${PACKAGE_VERSION}_iphoneos-arm64.deb"
@@ -77,37 +56,7 @@ with open('staging/DEBIAN/postinst', 'w') as f:
             dpkg-deb -b staging "$DEB_FILE"
           else
             echo "dpkg-deb not found, using Python to build deb..."
-            python3 -c "
-          import os, tarfile, io, struct, time
-          staging = 'staging'
-          deb_file = '${DEB_FILE}'
-          # Build control.tar.gz
-          ctrl_buf = io.BytesIO()
-          with tarfile.open(fileobj=ctrl_buf, mode='w:gz') as tar:
-            for f in os.listdir(os.path.join(staging, 'DEBIAN')):
-              tar.add(os.path.join(staging, 'DEBIAN', f), arcname=f)
-          # Build data.tar.gz
-          data_buf = io.BytesIO()
-          with tarfile.open(fileobj=data_buf, mode='w:gz') as tar:
-            for root, dirs, files in os.walk(staging):
-              if 'DEBIAN' in root: continue
-              for f in files:
-                fp = os.path.join(root, f)
-                arc = os.path.relpath(fp, staging)
-                tar.add(fp, arcname='./' + arc)
-          # Write deb (ar format)
-          with open(deb_file, 'wb') as out:
-            out.write(b'!<arch>\n')
-            def write_entry(name, data):
-              header = name.ljust(16).encode() + b'0           0     100644  '
-              header += str(len(data)).rjust(10).encode() + b'  0     U\n'
-              out.write(header + data)
-              if len(data) % 2: out.write(b'\n')
-            write_entry('debian-binary/     ', b'2.0\n')
-            write_entry('control.tar.gz/    ', ctrl_buf.getvalue())
-            write_entry('data.tar.gz/       ', data_buf.getvalue())
-          print(f'Built {deb_file}: {os.path.getsize(deb_file)} bytes')
-          "
+            python3 build_deb.py staging "$DEB_FILE"
           fi
           
           ls -lh "$DEB_FILE"

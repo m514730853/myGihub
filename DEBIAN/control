@@ -1,0 +1,10 @@
+Package: com.debstudy.getwifi
+Version: 1.0.0
+Section: Utilities
+Priority: optional
+Architecture: iphoneos-arm64
+Maintainer: DebStudy <debstudy@example.com>
+Description: GetWiFi - iOS WiFi SSID tool
+ A command-line tool to get current WiFi SSID
+ using public CoreLocation APIs on iOS.
+Depends: firmware (>=13.0)
