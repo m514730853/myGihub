@@ -50,23 +50,25 @@ jobs:
           cp build/getwifi staging/var/jb/usr/local/bin/
           chmod 755 staging/var/jb/usr/local/bin/getwifi
           
-          cat > staging/DEBIAN/control << 'CTRLEOF'
-Package: com.debstudy.getwifi
-Version: 1.0.0
-Section: Utilities
-Priority: optional
-Architecture: iphoneos-arm64
-Maintainer: DebStudy <debstudy@example.com>
-Description: GetWiFi - iOS WiFi SSID tool
- A command-line tool to get current WiFi SSID
- using public CoreLocation APIs on iOS.
-Depends: firmware (>=13.0)
-CTRLEOF
+          python3 -c "
+with open('staging/DEBIAN/control', 'w') as f:
+    f.write('Package: com.debstudy.getwifi\n')
+    f.write('Version: 1.0.0\n')
+    f.write('Section: Utilities\n')
+    f.write('Priority: optional\n')
+    f.write('Architecture: iphoneos-arm64\n')
+    f.write('Maintainer: DebStudy <debstudy@example.com>\n')
+    f.write('Description: GetWiFi - iOS WiFi SSID tool\n')
+    f.write(' A command-line tool to get current WiFi SSID\n')
+    f.write(' using public CoreLocation APIs on iOS.\n')
+    f.write('Depends: firmware (>=13.0)\n')
+"
           
-          cat > staging/DEBIAN/postinst << 'POSTEOF'
-#!/bin/sh
-chmod 755 /var/jb/usr/local/bin/getwifi
-POSTEOF
+          python3 -c "
+with open('staging/DEBIAN/postinst', 'w') as f:
+    f.write('#!/bin/sh\n')
+    f.write('chmod 755 /var/jb/usr/local/bin/getwifi\n')
+"
           chmod 755 staging/DEBIAN/postinst
           
           DEB_FILE="${PACKAGE_NAME}_${PACKAGE_VERSION}_iphoneos-arm64.deb"
