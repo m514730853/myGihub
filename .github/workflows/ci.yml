@@ -1,0 +1,67 @@
+name: CI - Code Check
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main, develop]
+
+jobs:
+  lint-and-check:
+    name: Code Quality Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Verify source files exist
+        run: |
+          echo "检查源文件..."
+          REQUIRED_FILES=(
+            "src/getwifi.m"
+            "src/GetWiFi.mm"
+            "src/getwifi_cross.c"
+            "Makefile"
+          )
+          
+          for file in "${REQUIRED_FILES[@]}"; do
+            if [ -f "$file" ]; then
+              echo "✅ $file"
+            else
+              echo "❌ $file 缺失"
+              exit 1
+            fi
+          done
+          echo "所有必要文件检查通过！"
+      
+      - name: Validate C syntax (cross platform)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc
+          
+          gcc -fsyntax-only src/getwifi_cross.c 2>&1 || {
+            echo "getwifi_cross.c 语法检查失败"
+            exit 1
+          }
+          echo "✅ C 语法检查通过"
+      
+      - name: Validate YAML syntax
+        run: |
+          python3 -c "import yaml; yaml.safe_load(open('.github/workflows/build.yml'))" && echo "✅ build.yml OK"
+          python3 -c "import yaml; yaml.safe_load(open('.github/workflows/release.yml'))" && echo "✅ release.yml OK"
+      
+      - name: Check .gitignore exists
+        run: |
+          if [ ! -f ".gitignore" ]; then
+            cat > .gitignore << 'EOF'
+build/
+output/
+deb_build/
+staging/
+*.deb
+.DS_Store
+.idea/
+.vscode/
+*.xcodeproj/
+EOF
+          fi
+          echo "✅ .gitignore ready"

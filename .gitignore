@@ -1,0 +1,14 @@
+build/
+output/
+deb_build/
+staging/
+*.deb
+.DS_Store
+.idea/
+.vscode/
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+DerivedData/
+*.moved-aside
+Pods/

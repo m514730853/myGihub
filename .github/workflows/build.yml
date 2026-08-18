@@ -1,0 +1,277 @@
+name: Build GetWiFi iOS Plugin
+
+on:
+  push:
+    branches: [main, develop]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  THEOS_VERSION: latest
+  IOS_SDK_VERSION: "15.0"
+  PACKAGE_NAME: com.debstudy.getwifi
+  PACKAGE_VERSION: "1.0.0"
+
+jobs:
+  build-ios:
+    name: Build iOS Plugin (macOS)
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up environment
+        run: |
+          echo "WORKSPACE: $GITHUB_WORKSPACE"
+          echo "OS: $(sw_vers)"
+          echo "Xcode: $(xcodebuild -version)"
+          echo "SDK: $(xcrun --sdk iphoneos --show-sdk-path)"
+
+      - name: Install Theos
+        run: |
+          git clone --recursive https://github.com/theos/theos.git $HOME/theos
+          cd $HOME/theos
+          make
+
+      - name: Install ldid (codesigning tool)
+        run: |
+          brew install ldid
+
+      - name: Set iOS SDK path
+        run: |
+          echo "IPHONEOS_SDK=$(xcrun --sdk iphoneos --show-sdk-path)" >> $GITHUB_ENV
+
+      - name: Build getwifi command line tool
+        run: |
+          export THEOS=$HOME/theos
+          export THEOS_PACKAGE_DIR_NAME=debs
+          
+          cd $GITHUB_WORKSPACE
+          
+          $THEOS/bin/clang -arch arm64 \
+            -isysroot $IPHONEOS_SDK \
+            -fobjc-arc \
+            -framework Foundation \
+            -o build/getwifi \
+            src/getwifi.m \
+            -lMobileWiFi \
+            -Wl,-rpath,/usr/lib
+
+      - name: Build GetWiFi SpringBoard plugin
+        run: |
+          export THEOS=$HOME/theos
+          export THEOS_PACKAGE_DIR_NAME=debs
+          
+          cd $GITHUB_WORKSPACE
+          
+          $THEOS/bin/clang -arch arm64 \
+            -isysroot $IPHONEOS_SDK \
+            -fobjc-arc \
+            -fPIC \
+            -shared \
+            -framework UIKit \
+            -framework Foundation \
+            -o build/GetWiFi.dylib \
+            src/GetWiFi.mm \
+            -lMobileWiFi \
+            -Wl,-rpath,/usr/lib
+
+      - name: Verify binaries
+        run: |
+          echo "=== getwifi ==="
+          file build/getwifi
+          echo ""
+          echo "=== GetWiFi.dylib ==="
+          file build/GetWiFi.dylib
+          echo ""
+          echo "Architecture check:"
+          lipo -info build/getwifi
+          lipo -info build/GetWiFi.dylib
+
+      - name: Build DEB package
+        run: |
+          cd $GITHUB_WORKSPACE
+          
+          DEB_DIR=deb_build
+          PACKAGE_DIR=$DEB_DIR/${PACKAGE_NAME}
+          
+          rm -rf $DEB_DIR
+          mkdir -p $PACKAGE_DIR/DEBIAN
+          mkdir -p $PACKAGE_DIR/usr/local/bin
+          mkdir -p $PACKAGE_DIR/Library/Loader/SBPlugins
+          
+          cp build/getwifi $PACKAGE_DIR/usr/local/bin/
+          cp build/GetWiFi.dylib $PACKAGE_DIR/Library/Loader/SBPlugins/
+          
+          chmod 755 $PACKAGE_DIR/usr/local/bin/getwifi
+          chmod 755 $PACKAGE_DIR/Library/Loader/SBPlugins/GetWiFi.dylib
+          
+          INSTALLED_SIZE=$(du -sk $PACKAGE_DIR | cut -f1)
+          
+          cat > $PACKAGE_DIR/DEBIAN/control << 'CONTROL'
+Package: com.debstudy.getwifi
+Version: 1.0.0
+Section: Utilities
+Priority: optional
+Architecture: arm64
+Maintainer: DebStudy <debstudy@example.com>
+Description: 获取iOS设备WiFi信息的越狱插件
+  提供命令行工具和SpringBoard插件
+  获取WiFi SSID、BSSID、信号强度等信息
+Depends: firmware (>=11.0), mobilesubstrate
+CONTROL
+          
+          cat > $PACKAGE_DIR/DEBIAN/postinst << 'POSTINST'
+#!/bin/sh
+chmod 755 /usr/local/bin/getwifi
+chmod 755 /Library/Loader/SBPlugins/GetWiFi.dylib
+killall -9 SpringBoard 2>/dev/null || true
+POSTINST
+          chmod 755 $PACKAGE_DIR/DEBIAN/postinst
+          
+          cat > $PACKAGE_DIR/DEBIAN/postrm << 'POSTRM'
+#!/bin/sh
+killall -9 SpringBoard 2>/dev/null || true
+POSTRM
+          chmod 755 $PACKAGE_DIR/DEBIAN/postrm
+          
+          DEB_FILE="${PACKAGE_NAME}_${PACKAGE_VERSION}_iphoneos-arm64.deb"
+          
+          dpkg-deb -b $PACKAGE_DIR $DEB_FILE
+          
+          echo "DEB created: $(ls -la $DEB_FILE)"
+          echo "SIZE: $(du -h $DEB_FILE | cut -f1)"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-build-artifacts
+          path: |
+            build/
+            *.deb
+          retention-days: 30
+
+      - name: Upload DEB as release asset (tagged commits)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            *.deb
+          body: |
+            ## GetWiFi v${{ env.PACKAGE_VERSION }}
+            
+            iOS WiFi信息获取插件
+            
+            ### 安装方法
+            ```bash
+            scp ${PACKAGE_NAME}_${PACKAGE_VERSION}_iphoneos-arm64.deb root@<设备IP>:/tmp/
+            ssh root@<设备IP>
+            dpkg -i /tmp/${PACKAGE_NAME}_${PACKAGE_VERSION}_iphoneos-arm64.deb
+            ```
+            
+            ### 使用方法
+            ```bash
+            getwifi              # 显示WiFi信息
+            getwifi --json       # JSON格式输出
+            ```
+
+      - name: Show build summary
+        run: |
+          echo "=== 构建完成 ==="
+          echo "二进制文件:"
+          ls -lh build/
+          echo ""
+          echo "DEB包:"
+          ls -lh *.deb 2>/dev/null || echo "(无)"
+          echo ""
+          echo "下载产物: 查看 Actions -> Artifacts"
+
+  build-windows:
+    name: Build Windows Test Binary
+    runs-on: windows-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Find MSVC compiler
+        run: |
+          echo "##[command]where cl.exe"
+          where cl.exe 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "MSVC not in PATH, searching..."
+            $vsPath = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+            if ($vsPath) {
+              Write-Host "Found VS at: $vsPath"
+            }
+          }
+
+      - name: Build with GCC (via MSYS2/MinGW)
+        shell: bash
+        run: |
+          # Install MinGW via chocolatey or direct download
+          choco install mingw -y 2>/dev/null || true
+          
+          # Fallback: download winlibs
+          if ! command -v gcc &> /dev/null; then
+            echo "Downloading MinGW-w64..."
+            curl -L -o mingw.zip "https://github.com/niXman/mingw-builds-binaries/releases/download/13.1.0-rt11.0.0-ucrt-v12.0.0-x86_64-posix-seh/mingw13.1.0-rt11.0.0-ucrt-v12.0.0-x86_64-posix-seh.zip"
+            unzip -q mingw.zip -d mingw64
+            export PATH="$PWD/mingw64/bin:$PATH"
+          fi
+          
+          gcc --version
+          
+          mkdir -p build
+          gcc -o build/getwifi.exe src/getwifi_cross.c -lws2_32
+          
+          if [ -f "build/getwifi.exe" ]; then
+            echo "Build successful!"
+            file build/getwifi.exe
+          else
+            echo "Build failed!"
+            exit 1
+          fi
+
+      - name: Upload Windows artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: build/getwifi.exe
+          retention-days: 30
+
+  build-linux:
+    name: Build Linux Test Binary
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential
+
+      - name: Build
+        run: |
+          gcc --version
+          mkdir -p build
+          gcc -o build/getwifi src/getwifi_cross.c
+          file build/getwifi
+          echo "Build successful!"
+
+      - name: Upload Linux artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-build
+          path: build/getwifi
+          retention-days: 30

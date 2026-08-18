@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.debstudy.getwifi</string>
+    <key>CFBundleName</key>
+    <string>GetWiFi</string>
+    <key>CFBundleVersion</key>
+    <string>1.0.0</string>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>需要访问位置信息来获取WiFi名称</string>
+    <key>NSLocationAlwaysUsageDescription</key>
+    <string>需要访问位置信息来获取WiFi名称</string>
+</dict>
+</plist>

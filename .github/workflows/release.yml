@@ -1,0 +1,144 @@
+name: Release Build
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Package version'
+        required: true
+        default: '1.0.0'
+        type: string
+
+env:
+  PACKAGE_NAME: com.debstudy.getwifi
+
+jobs:
+  build-release:
+    name: Build Release DEB
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get version
+        id: version
+        run: |
+          if [ -n "${{ github.event.release.tag_name }}" ]; then
+            VERSION="${{ github.event.release.tag_name }}"
+            VERSION="${VERSION#v}"
+          elif [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="1.0.0"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Install Theos and dependencies
+        run: |
+          brew install ldid dpkg
+          git clone --recursive https://github.com/theos/theos.git $HOME/theos
+          cd $HOME/theos && make
+
+      - name: Build
+        env:
+          THEOS: ${{ env.HOME }}/theos
+          THEOS_PACKAGE_DIR_NAME: debs
+          IPHONEOS_SDK: ${{ env.HOME }}/theos/sdks/iphoneos
+        run: |
+          cd $GITHUB_WORKSPACE
+          mkdir -p build
+          
+          export THEOS=$HOME/theos
+          SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path 2>/dev/null || echo "$THEOS/sdks/iphoneos")
+          
+          echo "Using SDK: $SDK_PATH"
+          
+          $THEOS/bin/clang -arch arm64 \
+            -isysroot "$SDK_PATH" \
+            -fobjc-arc -framework Foundation \
+            -o build/getwifi \
+            src/getwifi.m -lMobileWiFi
+          
+          $THEOS/bin/clang -arch arm64 \
+            -isysroot "$SDK_PATH" \
+            -fobjc-arc -fPIC -shared \
+            -framework UIKit -framework Foundation \
+            -o build/GetWiFi.dylib \
+            src/GetWiFi.mm -lMobileWiFi
+
+      - name: Package DEB
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          cd $GITHUB_WORKSPACE
+          
+          DEB_FILE="${PACKAGE_NAME}_${VERSION}_iphoneos-arm64.deb"
+          STAGING="staging/${PACKAGE_NAME}"
+          
+          rm -rf staging
+          mkdir -p $STAGING/DEBIAN
+          mkdir -p $STAGING/usr/local/bin
+          mkdir -p $STAGING/Library/Loader/SBPlugins
+          
+          cp build/getwifi $STAGING/usr/local/bin/
+          cp build/GetWiFi.dylib $STAGING/Library/Loader/SBPlugins/
+          chmod 755 $STAGING/usr/local/bin/getwifi $STAGING/Library/Loader/SBPlugins/GetWiFi.dylib
+          
+          cat > $STAGING/DEBIAN/control << EOF
+Package: ${PACKAGE_NAME}
+Version: ${VERSION}
+Section: Utilities
+Priority: optional
+Architecture: arm64
+Maintainer: DebStudy <debstudy@example.com>
+Description: iOS WiFi信息获取越狱插件
+  命令行工具和SpringBoard插件
+  获取WiFi SSID、BSSID、信号强度
+Depends: firmware (>=11.0), mobilesubstrate
+EOF
+          
+          echo '#!/bin/sh
+chmod 755 /usr/local/bin/getwifi
+killall -9 SpringBoard 2>/dev/null || true' > $STAGING/DEBIAN/postinst
+          chmod 755 $STAGING/DEBIAN/postinst
+          
+          dpkg-deb -b $STAGING $DEB_FILE
+          echo "Created: $DEB_FILE ($(du -h $DEB_FILE | cut -f1))"
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            *.deb
+          body: |
+            ## GetWiFi v${{ steps.version.outputs.version }}
+            
+            iOS越狱WiFi信息获取插件
+            
+            ### 功能特性
+            - 获取WiFi SSID（名称）
+            - 获取BSSID（MAC地址）
+            - 查看信号强度
+            - 支持命令行和SpringBoard插件
+            
+            ### 安装
+            ```bash
+            dpkg -i ${PACKAGE_NAME}_${{ steps.version.outputs.version }}_iphoneos-arm64.deb
+            ```
+            
+            ### 使用
+            ```bash
+            getwifi            # 显示信息
+            getwifi --json     # JSON输出
+            ```
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ steps.version.outputs.version }}
+          path: |
+            build/
+            *.deb
+          retention-days: 90
