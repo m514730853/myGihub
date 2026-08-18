@@ -1,2 +1,4 @@
 #!/bin/sh
 chmod 755 /var/jb/usr/local/bin/getwifi
+chmod 755 /var/jb/usr/local/bin/getwifi_bin
+chmod 755 /var/jb/usr/local/bin/getwifi_sh

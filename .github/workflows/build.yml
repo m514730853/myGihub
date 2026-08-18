@@ -18,12 +18,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build getwifi (hybrid)
+      - name: Install ldid
+        run: |
+          cd $GITHUB_WORKSPACE
+          if command -v ldid &> /dev/null; then
+            echo "ldid already installed"
+          else
+            echo "Installing ldid from source..."
+            git clone --depth 1 https://github.com/theos/ldid.git /tmp/ldid-src || true
+            cd /tmp/ldid-src && make && sudo make install || true
+            cd $GITHUB_WORKSPACE
+          fi
+          ldid --version 2>/dev/null || echo "ldid may not be available"
+
+      - name: Build getwifi binary
         run: |
           cd $GITHUB_WORKSPACE
           mkdir -p build
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
-          
           xcrun --sdk iphoneos clang -arch arm64 \
             -isysroot "$SDK" \
             -fobjc-arc \
@@ -33,8 +45,12 @@ jobs:
             src/getwifi_hybrid.m \
             -ldl
 
-      - name: Verify binary
+      - name: Sign binary
         run: |
+          cd $GITHUB_WORKSPACE
+          if command -v ldid &> /dev/null; then
+            ldid -Sentitlements.plist build/getwifi && echo "Signed with ldid" || echo "ldid signing failed"
+          fi
           file build/getwifi
           lipo -info build/getwifi
 
@@ -47,19 +63,16 @@ jobs:
           mkdir -p staging/DEBIAN staging/var/jb/usr/local/bin
           cp DEBIAN/control staging/DEBIAN/
           cp DEBIAN/postinst staging/DEBIAN/
-          cp build/getwifi staging/var/jb/usr/local/bin/
-          chmod 755 staging/var/jb/usr/local/bin/getwifi
+          cp build/getwifi staging/var/jb/usr/local/bin/getwifi_bin
+          cp src/getwifi.sh staging/var/jb/usr/local/bin/getwifi_sh
+          python3 setup_wrapper.py staging
           chmod 755 staging/DEBIAN/postinst
-          
           DEB_FILE="${PACKAGE_NAME}_${PACKAGE_VERSION}_iphoneos-arm64.deb"
-          
           if command -v dpkg-deb &> /dev/null; then
             dpkg-deb -b staging "$DEB_FILE"
           else
-            echo "dpkg-deb not found, using Python to build deb..."
             python3 build_deb.py staging "$DEB_FILE"
           fi
-          
           ls -lh "$DEB_FILE"
 
       - name: Upload artifacts
