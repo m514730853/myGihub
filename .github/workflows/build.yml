@@ -1,9 +1,8 @@
-name: Build GetWiFi iOS Plugin
+name: Build GetWiFi
 
 on:
   push:
     branches: [main, develop]
-    tags: ['v*']
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -14,83 +13,49 @@ env:
 
 jobs:
   build-ios:
-    name: Build iOS Plugin (macOS)
+    name: Build iOS (macOS)
     runs-on: macos-latest
-    
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up build environment
-        run: |
-          echo "OS: $(sw_vers)"
-          echo "Xcode: $(xcodebuild -version)"
-          xcrun --sdk iphoneos --show-sdk-path >> sdk_path.txt
-          echo "SDK: $(cat sdk_path.txt)"
-          brew install dpkg
-
-      - name: Build getwifi
+      - name: Build getwifi (public API)
         run: |
           cd $GITHUB_WORKSPACE
           mkdir -p build
-          SDK=$(cat sdk_path.txt)
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
           
           xcrun --sdk iphoneos clang -arch arm64 \
             -isysroot "$SDK" \
             -fobjc-arc \
             -framework Foundation \
+            -framework CoreLocation \
+            -framework SystemConfiguration \
             -o build/getwifi \
-            src/getwifi.m \
-            -lMobileWiFi
+            src/getwifi_public.m
 
-      - name: Build GetWiFi.dylib
+      - name: Verify binary
         run: |
-          cd $GITHUB_WORKSPACE
-          SDK=$(cat sdk_path.txt)
-          
-          xcrun --sdk iphoneos clang -arch arm64 \
-            -isysroot "$SDK" \
-            -fobjc-arc \
-            -fPIC -shared \
-            -framework UIKit \
-            -framework Foundation \
-            -o build/GetWiFi.dylib \
-            src/GetWiFi.mm \
-            -lMobileWiFi
-
-      - name: Verify binaries
-        run: |
-          echo "=== Binary Info ==="
           file build/getwifi
-          file build/GetWiFi.dylib
-          echo "=== Architecture ==="
           lipo -info build/getwifi
-          lipo -info build/GetWiFi.dylib
 
-      - name: Build DEB package
+      - name: Build DEB
         run: |
           cd $GITHUB_WORKSPACE
-          VERSION="${{ env.PACKAGE_VERSION }}"
+          brew install dpkg
           
           rm -rf staging
-          mkdir -p staging/DEBIAN staging/usr/local/bin staging/Library/Loader/SBPlugins
+          mkdir -p staging/DEBIAN staging/usr/local/bin
           
           cp build/getwifi staging/usr/local/bin/
-          cp build/GetWiFi.dylib staging/Library/Loader/SBPlugins/
-          chmod 755 staging/usr/local/bin/getwifi staging/Library/Loader/SBPlugins/GetWiFi.dylib
+          chmod 755 staging/usr/local/bin/getwifi
           
-          printf 'Package: %s\nVersion: %s\nSection: Utilities\nPriority: optional\nArchitecture: arm64\nMaintainer: DebStudy <debstudy@example.com>\nDescription: iOS WiFi plugin\n  Get WiFi SSID, BSSID, signal strength\nDepends: firmware (>=11.0), mobilesubstrate\n' "${PACKAGE_NAME}" "$VERSION" > staging/DEBIAN/control
+          printf 'Package: %s\nVersion: %s\nSection: Utilities\nPriority: optional\nArchitecture: arm64\nMaintainer: DebStudy <debstudy@example.com>\nDescription: iOS WiFi info tool\n  Get WiFi SSID using public APIs\nDepends: firmware (>=13.0)\n' "${PACKAGE_NAME}" "${PACKAGE_VERSION}" > staging/DEBIAN/control
           
-          printf '#!/bin/sh\nchmod 755 /usr/local/bin/getwifi\nkillall -9 SpringBoard 2>/dev/null || true\n' > staging/DEBIAN/postinst
+          printf '#!/bin/sh\nchmod 755 /usr/local/bin/getwifi\n' > staging/DEBIAN/postinst
           chmod 755 staging/DEBIAN/postinst
           
-          printf '#!/bin/sh\nkillall -9 SpringBoard 2>/dev/null || true\n' > staging/DEBIAN/postrm
-          chmod 755 staging/DEBIAN/postrm
-          
-          DEB_FILE="${PACKAGE_NAME}_${VERSION}_iphoneos-arm64.deb"
+          DEB_FILE="${PACKAGE_NAME}_${PACKAGE_VERSION}_iphoneos-arm64.deb"
           dpkg-deb -b staging "$DEB_FILE"
-          
-          echo "DEB created:"
           ls -lh "$DEB_FILE"
 
       - name: Upload artifacts
@@ -103,26 +68,20 @@ jobs:
           retention-days: 30
 
   build-windows:
-    name: Build Windows Test
+    name: Build Windows
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Build with GCC
-        shell: bash
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Build
+        shell: cmd
         run: |
-          if ! command -v gcc &> /dev/null; then
-            echo "Installing MinGW..."
-            curl -L -o mingw.zip "https://github.com/niXman/mingw-builds-binaries/releases/download/13.1.0-rt11.0.0-ucrt-v12.0.0-x86_64-posix-seh/mingw13.1.0-rt11.0.0-ucrt-v12.0.0-x86_64-posix-seh.zip"
-            unzip -q mingw.zip -d mingw64
-            export PATH="$PWD/mingw64/bin:$PATH"
-          fi
-          
-          gcc --version
-          mkdir -p build
-          gcc -o build/getwifi.exe src/getwifi_cross.c -lws2_32
-          file build/getwifi.exe
-      
+          mkdir build
+          cl /Fe:build\getwifi.exe src\getwifi_cross.c /link ws2_32.lib
+
       - name: Upload artifact
         if: success()
         uses: actions/upload-artifact@v4
@@ -132,19 +91,18 @@ jobs:
           retention-days: 30
 
   build-linux:
-    name: Build Linux Test
+    name: Build Linux
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Build
         run: |
           sudo apt-get update && sudo apt-get install -y build-essential
-          gcc --version
           mkdir -p build
           gcc -o build/getwifi src/getwifi_cross.c
           file build/getwifi
-      
+
       - name: Upload artifact
         if: success()
         uses: actions/upload-artifact@v4

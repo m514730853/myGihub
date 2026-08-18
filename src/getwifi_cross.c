@@ -6,93 +6,105 @@
 #include <windows.h>
 #include <wlanapi.h>
 #pragma comment(lib, "wlanapi.lib")
+#pragma comment(lib, "ws2_32.lib")
 #else
 #include <unistd.h>
 #endif
 
 void usage(const char *prog) {
-    printf("GetWiFi - 获取WiFi信息工具\n");
-    printf("用法: %s [选项]\n", prog);
-    printf("选项:\n");
-    printf("  无参数      显示当前WiFi信息\n");
-    printf("  --json      以JSON格式输出\n");
-    printf("  -h, --help  显示帮助信息\n");
-    printf("\n");
+    printf("GetWiFi - WiFi info tool\n");
+    printf("Usage: %s [options]\n", prog);
+    printf("Options:\n");
+    printf("  (none)    Show current WiFi info\n");
+    printf("  --json    Output in JSON format\n");
+    printf("  -h        Show help\n");
 }
 
 #ifdef _WIN32
 
-int get_windows_wifi(const char *json_output) {
-    HANDLE hClient;
-    DWORD dwMaxClient;
-    DWORD dwCurVersion;
-    DWORD result;
+int get_windows_wifi(int json_output) {
+    HANDLE hClient = NULL;
+    DWORD dwMaxClient = 0;
+    DWORD dwCurVersion = 0;
+    DWORD dwResult = 0;
 
-    result = WlanOpenHandle(2, NULL, &dwMaxClient, &dwCurVersion, &hClient);
-    if (result != ERROR_SUCCESS) {
-        printf("错误: 无法打开WLAN客户端 (错误码: %lu)\n", result);
+    dwResult = WlanOpenHandle(2, NULL, &dwMaxClient, &dwCurVersion, &hClient);
+    if (dwResult != ERROR_SUCCESS) {
+        printf("Error: WlanOpenHandle failed (code: %lu)\n", dwResult);
         return 1;
     }
 
-    PWLAN_CONNECTION_INFO pConnInfo = NULL;
-    result = WlanQueryInterface(hClient, &GUID_DEVINTERFACE_802_11,
-                                WlanQueryConnectionInformation, NULL, NULL,
-                                (LPVOID*)&pConnInfo);
-    if (result != ERROR_SUCCESS || pConnInfo == NULL) {
-        printf("当前未连接WiFi\n");
+    PWLAN_INTERFACE_INFO_LIST pIfList = NULL;
+    dwResult = WlanEnumInterfaces(hClient, NULL, &pIfList);
+    if (dwResult != ERROR_SUCCESS) {
+        printf("Error: WlanEnumInterfaces failed (code: %lu)\n", dwResult);
         WlanCloseHandle(hClient, NULL);
-        return 0;
+        return 1;
     }
 
     char ssid_str[256] = "N/A";
     char bssid_str[256] = "N/A";
-    char signal_str[64] = "0";
+    int signal_quality = 0;
+    int found = 0;
 
-    if (pConnInfo->isState == wlan_connected) {
-        if (pConnInfo->wlanConnectionSecurity == wlan_security_wpa2 ||
-            pConnInfo->wlanConnectionSecurity == wlan_security_wpa3 ||
-            pConnInfo->wlanConnectionSecurity == wlan_security_wpa ||
-            pConnInfo->wlanConnectionSecurity == wlan_security_wep ||
-            pConnInfo->wlanConnectionSecurity == wlan_security_8021x) {
-            
-            if (pConnInfo->dot11Ssid.uSSIDLength > 0 && 
-                pConnInfo->dot11Ssid.uSSIDLength <= 32) {
-                memcpy(ssid_str, pConnInfo->dot11Ssid.ucSSID, 
-                       pConnInfo->dot11Ssid.uSSIDLength);
-                ssid_str[pConnInfo->dot11Ssid.uSSIDLength] = '\0';
-            }
-            
-            if (pConnInfo->dot11Bssid) {
-                sprintf(bssid_str, "%02X:%02X:%02X:%02X:%02X:%02X",
-                        pConnInfo->dot11Bssid[0], pConnInfo->dot11Bssid[1],
-                        pConnInfo->dot11Bssid[2], pConnInfo->dot11Bssid[3],
-                        pConnInfo->dot11Bssid[4], pConnInfo->dot11Bssid[5]);
-            }
-
-            if (pConnInfo->wlanSignalQuality) {
-                int signal = (int)pConnInfo->wlanSignalQuality;
-                signal = -100 + (signal * 100 / 100) * 0 - (100 - signal);
-                sprintf(signal_str, "%d", -100 + (pConnInfo->wlanSignalQuality * 50 / 100));
-            }
+    for (DWORD i = 0; i < pIfList->dwNumberOfItems; i++) {
+        if (pIfList->InterfaceInfo[i].isState != wlan_interface_state_connected) {
+            continue;
         }
+
+        ULONG dwSize = 0;
+        PWLAN_CONNECTION_ATTRIBUTES pAttr = NULL;
+        dwResult = WlanQueryInterface(
+            hClient,
+            &pIfList->InterfaceInfo[i].InterfaceGuid,
+            wlan_intf_opcode_current_connection,
+            NULL,
+            &dwSize,
+            (PVOID*)&pAttr,
+            NULL
+        );
+
+        if (dwResult == ERROR_SUCCESS && pAttr) {
+            if (pAttr->wlanAssociationAttributes.dot11Ssid.uSSIDLength > 0 &&
+                pAttr->wlanAssociationAttributes.dot11Ssid.uSSIDLength <= 32) {
+                memcpy(ssid_str, pAttr->wlanAssociationAttributes.dot11Ssid.ucSSID,
+                       pAttr->wlanAssociationAttributes.dot11Ssid.uSSIDLength);
+                ssid_str[pAttr->wlanAssociationAttributes.dot11Ssid.uSSIDLength] = '\0';
+            }
+
+            UCHAR *bssid = pAttr->wlanAssociationAttributes.dot11Bssid;
+            sprintf(bssid_str, "%02X:%02X:%02X:%02X:%02X:%02X",
+                    bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5]);
+
+            signal_quality = pAttr->wlanAssociationAttributes.wlanSignalQuality;
+            found = 1;
+            WlanFreeMemory(pAttr);
+            break;
+        }
+    }
+
+    if (pIfList) WlanFreeMemory(pIfList);
+    WlanCloseHandle(hClient, NULL);
+
+    if (!found) {
+        printf("Not connected to WiFi\n");
+        return 0;
     }
 
     if (json_output) {
         printf("{\n");
         printf("  \"SSID\": \"%s\",\n", ssid_str);
         printf("  \"BSSID\": \"%s\",\n", bssid_str);
-        printf("  \"signalStrength\": %s,\n", signal_str);
+        printf("  \"signalQuality\": %d,\n", signal_quality);
         printf("  \"platform\": \"windows\"\n");
         printf("}\n");
     } else {
         printf("SSID: %s\n", ssid_str);
         printf("BSSID: %s\n", bssid_str);
-        printf("信号质量: %s%%\n", signal_str);
-        printf("平台: Windows\n");
+        printf("Signal: %d%%\n", signal_quality);
+        printf("Platform: Windows\n");
     }
 
-    WlanFreeMemory(pConnInfo);
-    WlanCloseHandle(hClient, NULL);
     return 0;
 }
 
@@ -103,10 +115,10 @@ int get_windows_wifi(const char *json_output) {
 #include <CoreFoundation/CoreFoundation.h>
 #include <SystemConfiguration/SystemConfiguration.h>
 
-int get_macos_wifi(const char *json_output) {
+int get_macos_wifi(int json_output) {
     CFArrayRef interfaces = CNCopySupportedInterfaces();
     if (!interfaces) {
-        printf("错误: 无法获取网络接口列表\n");
+        printf("Error: cannot get network interfaces\n");
         return 1;
     }
 
@@ -116,53 +128,46 @@ int get_macos_wifi(const char *json_output) {
     for (CFIndex i = 0; i < count; i++) {
         CFStringRef ifaceName = CFArrayGetValueAtIndex(interfaces, i);
         CFDictionaryRef info = CNCopyCurrentNetworkInfo(ifaceName);
-
         if (!info) continue;
 
         CFStringRef ssid = CFDictionaryGetValue(info, kCNNetworkInfoKeySSID);
         CFStringRef bssid = CFDictionaryGetValue(info, kCNNetworkInfoKeyBSSID);
 
         if (ssid) {
-            char ssidStr[256];
-            char bssidStr[256];
+            char ssidStr[256] = "N/A";
+            char bssidStr[256] = "N/A";
 
             CFStringGetCString(ssid, ssidStr, sizeof(ssidStr), kCFStringEncodingUTF8);
-
             if (bssid) {
                 CFStringGetCString(bssid, bssidStr, sizeof(bssidStr), kCFStringEncodingUTF8);
-            } else {
-                strcpy(bssidStr, "N/A");
             }
 
             if (json_output) {
                 printf("{\n");
                 printf("  \"SSID\": \"%s\",\n", ssidStr);
                 printf("  \"BSSID\": \"%s\",\n", bssidStr);
-                printf("  \"interface\": \"%s\",\n", 
-                       CFStringGetCStringPtr(ifaceName, kCFStringEncodingUTF8));
                 printf("  \"platform\": \"macos\"\n");
                 printf("}\n");
             } else {
                 printf("SSID: %s\n", ssidStr);
                 printf("BSSID: %s\n", bssidStr);
-                printf("平台: macOS\n");
+                printf("Platform: macOS\n");
             }
 
             found = 1;
             CFRelease(info);
             break;
         }
-
         CFRelease(info);
     }
 
     CFRelease(interfaces);
 
     if (!found) {
-        printf("当前未连接WiFi\n");
+        printf("Not connected to WiFi\n");
     }
 
-    return found ? 0 : 0;
+    return 0;
 }
 
 #endif
@@ -181,12 +186,11 @@ int main(int argc, char *argv[]) {
     }
 
 #ifdef _WIN32
-    return get_windows_wifi(json_output ? "1" : NULL);
+    return get_windows_wifi(json_output);
 #elif defined(__APPLE__)
-    return get_macos_wifi(json_output ? "1" : NULL);
+    return get_macos_wifi(json_output);
 #else
-    printf("此工具暂不支持当前平台\n");
-    printf("支持: Windows, macOS, iOS (越狱)\n");
+    printf("This tool supports Windows, macOS, and iOS\n");
     return 1;
 #endif
 }
