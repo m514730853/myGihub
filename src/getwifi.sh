@@ -15,48 +15,93 @@ show_help() {
 
 get_ssid_method1() {
     PlistBuddy="/usr/libexec/PlistBuddy"
-    plist="/Library/Preferences/SystemConfiguration/com.apple.wifi.message-tracer.plist"
-    if [ -x "$PlistBuddy" ] && [ -f "$plist" ]; then
-        SSID=$("$PlistBuddy" -c "Print :CurrentNetwork:SSID" "$plist" 2>/dev/null)
-        BSSID=$("$PlistBuddy" -c "Print :CurrentNetwork:BSSID" "$plist" 2>/dev/null)
-        if [ -n "$SSID" ]; then
-            return 0
-        fi
-    fi
-    return 1
-}
-
-get_ssid_method2() {
-    PlistBuddy="/usr/libexec/PlistBuddy"
-    plist="/Library/Preferences/SystemConfiguration/com.apple.wifi.message-tracer.plist"
-    if [ -x "$PlistBuddy" ] && [ -f "$plist" ]; then
-        BSSID=$("$PlistBuddy" -c "Print :CurrentNetwork:BSSID" "$plist" 2>/dev/null)
-        if [ -n "$BSSID" ]; then
-            SSID="(connected)"
-            return 0
-        fi
-    fi
-    return 1
-}
-
-get_ssid_method3() {
-    PlistBuddy="/usr/libexec/PlistBuddy"
-    for plist in /Library/Preferences/SystemConfiguration/*.plist; do
-        if [ -x "$PlistBuddy" ] && [ -f "$plist" ]; then
-            result=$("$PlistBuddy" -c "Print" "$plist" 2>/dev/null | grep -i "ssid" | head -1)
-            if [ -n "$result" ]; then
-                SSID=$(echo "$result" | sed 's/.*= //' | tr -d '"')
-                if [ -n "$SSID" ]; then
-                    return 0
-                fi
+    for prefix in "" "/var/jb"; do
+        plist="${prefix}/Library/Preferences/SystemConfiguration/com.apple.wifi.message-tracer.plist"
+        if [ -f "$plist" ]; then
+            SSID=$(sudo "$PlistBuddy" -c "Print :CurrentNetwork:SSID" "$plist" 2>/dev/null)
+            BSSID=$(sudo "$PlistBuddy" -c "Print :CurrentNetwork:BSSID" "$plist" 2>/dev/null)
+            if [ -n "$SSID" ] && [ "$SSID" != "" ] && [ "$SSID" != "The path/key does not exist" ]; then
+                return 0
             fi
         fi
     done
     return 1
 }
 
+get_ssid_method2() {
+    PlistBuddy="/usr/libexec/PlistBuddy"
+    for prefix in "" "/var/jb"; do
+        plist="${prefix}/Library/Preferences/SystemConfiguration/com.apple.wifi.message-tracer.plist"
+        if [ -f "$plist" ]; then
+            BSSID=$(sudo "$PlistBuddy" -c "Print :CurrentNetwork:BSSID" "$plist" 2>/dev/null)
+            if [ -n "$BSSID" ] && [ "$BSSID" != "The path/key does not exist" ]; then
+                SSID="(connected)"
+                return 0
+            fi
+        fi
+    done
+    return 1
+}
+
+get_ssid_method3() {
+    PlistBuddy="/usr/libexec/PlistBuddy"
+    for prefix in "" "/var/jb"; do
+        sysdir="${prefix}/Library/Preferences/SystemConfiguration"
+        if [ -d "$sysdir" ]; then
+            for plist in "$sysdir"/*.plist; do
+                if [ -f "$plist" ]; then
+                    result=$(sudo "$PlistBuddy" -c "Print" "$plist" 2>/dev/null | grep -i "ssid" | head -1)
+                    if [ -n "$result" ]; then
+                        SSID=$(echo "$result" | sed 's/.*= //' | tr -d '"')
+                        if [ -n "$SSID" ] && [ "$SSID" != "" ]; then
+                            return 0
+                        fi
+                    fi
+                fi
+            done
+        fi
+    done
+    return 1
+}
+
+debug_info() {
+    echo "=== Debug Info ==="
+    echo "Date: $(date)"
+    echo "Kernel: $(uname -a)"
+    echo ""
+    echo "Checking paths..."
+    for p in \
+        "/Library/Preferences/SystemConfiguration/com.apple.wifi.message-tracer.plist" \
+        "/var/jb/Library/Preferences/SystemConfiguration/com.apple.wifi.message-tracer.plist" \
+        "/usr/libexec/PlistBuddy"; do
+        if [ -f "$p" ]; then
+            echo "  [EXISTS] $p"
+        else
+            echo "  [MISSING] $p"
+        fi
+    done
+    echo ""
+    echo "Trying PlistBuddy directly..."
+    PlistBuddy="/usr/libexec/PlistBuddy"
+    for plist in \
+        "/Library/Preferences/SystemConfiguration/com.apple.wifi.message-tracer.plist" \
+        "/var/jb/Library/Preferences/SystemConfiguration/com.apple.wifi.message-tracer.plist"; do
+        if [ -f "$plist" ]; then
+            echo "  File: $plist"
+            sudo "$PlistBuddy" -c "Print" "$plist" 2>/dev/null | head -20
+            echo ""
+        fi
+    done
+    echo "=== End Debug ==="
+}
+
 if [ "$1" = "--help" ]; then
     show_help
+    exit 0
+fi
+
+if [ "$1" = "--debug" ]; then
+    debug_info
     exit 0
 fi
 
