@@ -50,7 +50,7 @@ jobs:
           cp build/getwifi staging/usr/local/bin/
           chmod 755 staging/usr/local/bin/getwifi
           
-          printf 'Package: %s\nVersion: %s\nSection: Utilities\nPriority: optional\nArchitecture: arm64\nMaintainer: DebStudy <debstudy@example.com>\nDescription: iOS WiFi info tool\n  Get WiFi SSID using public APIs\nDepends: firmware (>=13.0)\n' "${PACKAGE_NAME}" "${PACKAGE_VERSION}" > staging/DEBIAN/control
+          printf 'Package: %s\nVersion: %s\nSection: Utilities\nPriority: optional\nArchitecture: iphoneos-arm64\nMaintainer: DebStudy <debstudy@example.com>\nDescription: iOS WiFi info tool\n  Get WiFi SSID using public APIs\nDepends: firmware (>=13.0)\n' "${PACKAGE_NAME}" "${PACKAGE_VERSION}" > staging/DEBIAN/control
           
           printf '#!/bin/sh\nchmod 755 /usr/local/bin/getwifi\n' > staging/DEBIAN/postinst
           chmod 755 staging/DEBIAN/postinst
