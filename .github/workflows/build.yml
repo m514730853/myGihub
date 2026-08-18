@@ -44,8 +44,9 @@ jobs:
           export HOMEBREW_NO_REQUIRE_TAP_TRUST=1
           brew install dpkg || true
           rm -rf staging
-          mkdir -p staging/var/jb/usr/local/bin
-          cp DEBIAN staging/ -r
+          mkdir -p staging/DEBIAN staging/var/jb/usr/local/bin
+          cp DEBIAN/control staging/DEBIAN/
+          cp DEBIAN/postinst staging/DEBIAN/
           cp build/getwifi staging/var/jb/usr/local/bin/
           chmod 755 staging/var/jb/usr/local/bin/getwifi
           chmod 755 staging/DEBIAN/postinst
